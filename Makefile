@@ -1,5 +1,7 @@
 .SUFFIXES: .erl .beam .yrl
 
+PARSERS= src.erl/lathos_parse
+
 ebin/%.beam: src.erl/%.erl
 	erlc -o ebin -W $<
 	
@@ -16,9 +18,14 @@ BEAMS = ${ERLS:%=ebin/%.beam}
 all: test
 
 clean:
-	rm -rf ebin/*
+	rm -rf ./ebin
+	rm -rf ./doc
 
-compile: ${BEAMS}
+compile: parsers
+	mkdir -p ebin
+	erl -make
+
+parsers: $(PARSERS:%=%.erl)
 
 test: compile
 	erl -noshell -pa ebin -s lathos_tests test -s init stop
