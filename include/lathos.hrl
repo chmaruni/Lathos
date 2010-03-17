@@ -1,8 +1,4 @@
-%% id: Node identifiers.
--record(id, { name, version }).
+-record(node, { id, term }).
 
-%% node: Node structures.
-%%   id: #id
-%%   parent_ids: [#id]
-%%   description: [{text, <<...>>} | {link, <<...>>, Id}]
--record(node, { id, parent_ids, description }).
+% returned by the lathos_db:subtree/1
+-record (tree, {node, children}).

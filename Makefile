@@ -1,6 +1,6 @@
 .SUFFIXES: .erl .beam .yrl
 
-PARSERS= src.erl/lathos_parse
+PARSERS=
 
 ebin/%.beam: src.erl/%.erl
 	erlc -o ebin -W $<
@@ -28,8 +28,11 @@ compile: parsers
 parsers: $(PARSERS:%=%.erl)
 
 test: compile
-	erl -noshell -pa ebin -s lathos_tests test -s init stop
-	erl -noshell -pa ebin -s lathos_parse_tests test -s init stop
+	erl -noshell \
+		-pa ebin \
+		-s test_suite test \
+		-s init stop
+
 
 run_server: compile
 	erl -pa ebin -s lathos_serve start

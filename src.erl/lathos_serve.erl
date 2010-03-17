@@ -8,17 +8,11 @@ start()  -> pico_http_server:start(4999, 20, ?MODULE, [1,2,3]).
 stop()   -> pico_http_server:stop(4999, foo1234).
 
 start_handler(_) ->
-    lathos:start(), 
-    lathos:create_nodes([
-        #node{
-            id=#id{name="index", version=1}, 
-            parent_ids=[], 
-            description=[{text, "Index"}]}
-    ]),
+    lathos_db:start(), 
     ok.
     
 stop_handler(Reason, ok) ->
-    lathos:stop(), 
+    lathos_db:stop(), 
     {Reason, ok}.
     
 colors() -> ["CCCCCC", "BBBBBB", "AAAAAA", "999999"].
@@ -31,12 +25,11 @@ escape([$<|T]) -> ["&lt;", escape(T)];
 escape([H|T])  -> [H|escape(T)];
 escape([])     -> [].
 
-id_to_str(Id) -> lists:flatten(io_lib:format("~s.~p", [Id#id.name, Id#id.version])).
+id_to_str(Id) -> lists:flatten(io_lib:format("~w", [Id])).
 str_to_id(Str) ->
-    {match, [_, {Name_s, Name_l}, {Ver_s, Ver_l}]} = re:run(Str, "^(.*)\\.([0-9]+)$"),
-    Name = string:substr(Str, Name_s+1, Name_l), 
-    {Version, _} = string:to_integer(string:substr(Str, Ver_s+1, Ver_l)),
-    #id{name=Name, version=Version}.
+	{_, Tokens, _} = erl_scan:string(Str ++ "."),
+	{ok, Term} = erl_parse:parse_term(Tokens),
+    Term.
     
 url(Id) -> 
     IdStr = id_to_str(Id),
@@ -102,17 +95,12 @@ script() ->
 link_to_url(Text,Url) -> ["<A href='", Url, "'>", escape(Text), "</A>"].
 link_to_id(Text,Id) -> link_to_url(Text, url(Id)).
 
-html_description(_IdStr, []) ->
-    [];
-html_description(IdStr, [{text, Text} | D]) ->
+html_description(IdStr, Term) ->
     [
         "<SPAN class='msg' onclick='toggleId(\"", IdStr, "\")'>",
-        escape(Text),
+        escape(lists:flatten(io_lib:format("~w", [Term]))),
         "</SPAN>"
-        | html_description(IdStr, D)
-    ];
-html_description(IdStr, [{link, Text, Id} | D]) ->
-    [link_to_id(Text, Id), html_description(IdStr, D)].
+    ].
     
 open_div(Depth, UpLinkId, NodeId) ->
     [
@@ -131,7 +119,7 @@ html_tree(Depth, UpLinkId, {tree, Node, Children}) ->
     NodeId = Node#node.id,
     [
         open_div(Depth, UpLinkId, NodeId),
-        html_description(id_to_str(NodeId), Node#node.description),
+        html_description(id_to_str(NodeId), Node#node.term),
         lists:map(fun(C) -> html_tree(Depth+1, NodeId, C) end, Children),
         close_div()
     ];
@@ -163,36 +151,10 @@ response_for(IdStrs) ->
         "<DIV id='breadcrumbs'>\n",
         breadcrumbs("", Ids),
         "</DIV>\n",
-        html_tree(1, RootId, lathos:subtree(RootId)),
+        html_tree(1, RootId, lathos_db:subtree(RootId)),
         "</BODY>\n",
         "</HTML>"
     ].
-
-validate_chunk({text, String}) when is_list(String) ->
-    {text, String};
-validate_chunk({link, String, Id}) when is_list(String), is_tuple(Id) ->
-    VId = validate_id(Id),
-    {link, String, VId};
-validate_chunk(Chunk) ->
-    throw({invalid, chunk, Chunk}).
-    
-validate_description(Description) when is_list(Description) ->
-    lists:map(fun validate_chunk/1, Description);
-validate_description(Description) ->
-    throw({invalid, description, Description}).
-    
-validate_id(#id{name=Name, version=Version}) when is_list(Name), is_integer(Version) ->
-    #id{name=Name, version=Version};
-validate_id(Id) ->
-    throw({invalid, id, Id}).
-    
-validate_node(#node{id=Id, parent_ids=Parent_ids, description=Description}) when is_list(Parent_ids) ->
-    VId = validate_id(Id),
-    VParent_ids = lists:map(fun validate_id/1, Parent_ids),
-    VDescription = validate_description(Description),
-    #node{id=VId, parent_ids=VParent_ids, description=VDescription};
-validate_node(Node) ->
-    throw({invalid, node, Node}).
     
 event_handler({get, _Hostname, "/favicon.ico", _Args}, State) ->
     Code = "404 Not Found",
@@ -202,13 +164,18 @@ event_handler({get, _Hostname, "/favicon.ico", _Args}, State) ->
 event_handler({get, _Hostname, Uri, _Args}, State) ->
     Decoded = pico_utils:urlencoded2str(Uri),
     Response = case string:tokens(Decoded, "/") of
-        [] -> response_for(["index.1"]);
+        [] -> response_for(["{root}"]);
         Ids -> response_for(Ids)
-    end,
+    end,	
     {[header({ok, html}), Response], State};
-    
+	
 event_handler({post, _Hostname, "/create_nodes", [{PostData, _}]}, State) ->
-    {ok, Nodes} = lathos_parse:tokenize_and_parse(PostData),
-    VNodes = lists:map(fun validate_node/1, Nodes),
-    Response = lathos:create_nodes(VNodes),
+	{ok, Tokens, _} = erl_scan:string(PostData ++ "."),
+	{ok, Term} = erl_parse:parse_term(Tokens),
+	Response = add_data_from_term(Term),
     {[header({ok, text}), io_lib:format("~p", [Response])], State}.
+
+%currently, we only supply this simple form of over-the-wire protocol
+%add more later! and make it plug-in-nable
+add_data_from_term({Id, Parents, Term}) ->
+	lathos_db:add_node(Id, Parents, Term).
